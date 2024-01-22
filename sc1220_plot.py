@@ -53,6 +53,7 @@ def find_fft_peak(r_fft, freq):
 
 def polt_fft_(ch, data_I, data_Q):
     print('==========RX '+str(ch)+'==========')
+
     font = {'family': 'serif',
             'color':  'white',
             'weight': 'normal',
@@ -103,11 +104,11 @@ sc1220_thread.start()
 
 while (True):
     try:
-        msg = my_queue.get(True, 10)
+        msg = my_queue.get(True, 20)
         print('get message from sc1220 thread '+str(msg))
         if (msg == 1):
             break
-        elif (msg > 5):
+        elif (msg > 10000):
             break
     except:
         msg = -1
@@ -120,6 +121,8 @@ data_R1 = sc1220obj.data_R1
 data_R2 = sc1220obj.data_R2
 data_R3 = sc1220obj.data_R3
 data_R4 = sc1220obj.data_R4
+print("***get data R1 " + str(len(data_R1)) + " R2 " + str(len(data_R2)) + " R3 "
+      + str(len(data_R3)) + " R4 " + str(len(data_R4)))
 TC = sc1220obj.TC
 BW = sc1220obj.BW
 fs_IQ = sc1220obj.fs_IQ
@@ -143,6 +146,7 @@ if (len(data_R1)):
     for i in range(len(data_R1)):
         data_I += data_R1[i][0]
         data_Q += data_R1[i][1]
+
     # plotting
     ax[0, 0].plot(data_I, 'b', label='I')
     ax[0, 0].plot(data_Q, 'r', label='Q')

@@ -3,6 +3,7 @@ from tkinter import filedialog
 import queue
 import threading
 import time
+import serial
 
 
 def test(n):
@@ -32,6 +33,10 @@ class SC1220_object(object):
     data_R2 = []
     data_R3 = []
     data_R4 = []
+    get_rx1 = 0
+    get_rx2 = 0
+    get_rx3 = 0
+    get_rx4 = 0
 
     def __init__(self):
         pass
@@ -60,6 +65,89 @@ class SC1220_object(object):
             sc1220_thread.daemon = True
             sc1220_thread.start()
             return 1
+
+
+tempI = []
+tempQ = []
+
+
+def _proc_data(line, sc1220_ob):
+
+    if line[0:len("Chirp number:")] == "Chirp number:":
+        sc1220_ob.noc = int(line[len("Chirp number: "):-1])
+        print('noc =', sc1220_ob.noc)
+    elif line[0:len("Chirp points:")] == "Chirp points:":
+        sc1220_ob.NFFT = int(line[len("Chirp points: "):-1])
+        print('NFFT =', sc1220_ob.NFFT)
+    elif line[0:len("Bandwidth_MHz:")] == "Bandwidth_MHz:":
+        sc1220_ob.BW = int(line[len("Bandwidth_MHz: "):-1])
+        print('bandwidth =', sc1220_ob.BW)
+    elif line[0:len("Chirp time_us:")] == "Chirp time_us:":
+        sc1220_ob.TC = int(line[len("Chirp time_us: "):-1])
+        print('chirp time =', sc1220_ob.TC)
+    elif line[0:len("FS_IQ_KHz:")] == "FS_IQ_KHz:":
+        sc1220_ob.fs_IQ = float(line[len("FS_IQ_KHz: "):-1])
+        print('fs_IQ =', sc1220_ob.fs_IQ)
+    elif line[0:len("IQ_DATA_END")] == "IQ_DATA_END":
+        # 結束
+        return 1
+    elif line[0:len("Chrip_")] == "Chrip_":
+        # Chrip 資料段開始, init 資料陣列
+        sc1220_ob.data_R1.clear()
+        sc1220_ob.data_R2.clear()
+        sc1220_ob.data_R3.clear()
+        sc1220_ob.data_R4.clear()
+        sc1220_ob.get_rx1 = 0
+        sc1220_ob.get_rx2 = 0
+        sc1220_ob.get_rx3 = 0
+        sc1220_ob.get_rx4 = 0
+    elif line[0:len("RX1=====")] == "RX1=====":
+        tempI.clear()
+        tempQ.clear()
+        sc1220_ob.get_rx1 = 1
+        sc1220_ob.get_rx2 = 0
+        sc1220_ob.get_rx3 = 0
+        sc1220_ob.get_rx4 = 0
+    elif line[0:len("RX2=====")] == "RX2=====":
+        tempI.clear()
+        tempQ.clear()
+        sc1220_ob.get_rx1 = 0
+        sc1220_ob.get_rx2 = 1
+        sc1220_ob.get_rx3 = 0
+        sc1220_ob.get_rx4 = 0
+    elif line[0:len("RX3=====")] == "RX3=====":
+        tempI.clear()
+        tempQ.clear()
+        sc1220_ob.get_rx1 = 0
+        sc1220_ob.get_rx2 = 0
+        sc1220_ob.get_rx3 = 1
+        sc1220_ob.get_rx4 = 0
+    elif line[0:len("RX4=====")] == "RX4=====":
+        tempI.clear()
+        tempQ.clear()
+        sc1220_ob.get_rx1 = 0
+        sc1220_ob.get_rx2 = 0
+        sc1220_ob.get_rx3 = 0
+        sc1220_ob.get_rx4 = 1
+    elif line[0:len("RX_END=====")] == "RX_END=====":
+        if (sc1220_ob.get_rx1 == 1):
+            sc1220_ob.data_R1.append((tempI, tempQ))
+        elif (sc1220_ob.get_rx2 == 1):
+            sc1220_ob.data_R2.append((tempI, tempQ))
+        elif (sc1220_ob.get_rx3 == 1):
+            sc1220_ob.data_R3.append((tempI, tempQ))
+        elif (sc1220_ob.get_rx4 == 1):
+            sc1220_ob.data_R4.append((tempI, tempQ))
+        sc1220_ob.get_rx1 = 0
+        sc1220_ob.get_rx2 = 0
+        sc1220_ob.get_rx3 = 0
+        sc1220_ob.get_rx4 = 0
+    elif ((sc1220_ob.get_rx1 == 1) | (sc1220_ob.get_rx2 == 1) | (sc1220_ob.get_rx3 == 1) | (sc1220_ob.get_rx4 == 1)):
+        dot = line[:-1].split(',')
+        tempI.append(int(dot[0]))
+        tempQ.append(int(dot[1]))
+
+    return 0
 
 
 def _get_data_from_file(filename, sc1220_ob):
@@ -94,8 +182,8 @@ def _get_data_from_file(filename, sc1220_ob):
                 sc1220_ob.data_R3.clear()
                 sc1220_ob.data_R4.clear()
             elif line[0:len("RX1=====")] == "RX1=====":
-                tempI = []
-                tempQ = []
+                tempI.clear()
+                tempQ.clear()
                 for i in range(sc1220_ob.NFFT):
                     line = file_obj.readline()
                     dot = line[:-1].split(',')
@@ -103,8 +191,8 @@ def _get_data_from_file(filename, sc1220_ob):
                     tempQ.append(int(dot[1]))
                 sc1220_ob.data_R1.append((tempI, tempQ))
             elif line[0:len("RX2=====")] == "RX2=====":
-                tempI = []
-                tempQ = []
+                tempI.clear()
+                tempQ.clear()
                 for i in range(sc1220_ob.NFFT):
                     line = file_obj.readline()
                     dot = line[:-1].split(',')
@@ -112,8 +200,8 @@ def _get_data_from_file(filename, sc1220_ob):
                     tempQ.append(int(dot[1]))
                 sc1220_ob.data_R2.append((tempI, tempQ))
             elif line[0:len("RX3=====")] == "RX3=====":
-                tempI = []
-                tempQ = []
+                tempI.clear()
+                tempQ.clear()
                 for i in range(sc1220_ob.NFFT):
                     line = file_obj.readline()
                     dot = line[:-1].split(',')
@@ -121,8 +209,8 @@ def _get_data_from_file(filename, sc1220_ob):
                     tempQ.append(int(dot[1]))
                 sc1220_ob.data_R3.append((tempI, tempQ))
             elif line[0:len("RX4=====")] == "RX4=====":
-                tempI = []
-                tempQ = []
+                tempI.clear()
+                tempQ.clear()
                 for i in range(sc1220_ob.NFFT):
                     line = file_obj.readline()
                     dot = line[:-1].split(',')
@@ -135,11 +223,34 @@ def _get_data_from_file(filename, sc1220_ob):
 
 
 def _get_data_from_uart(port, m_queue, sc1220_ob):
+    print('open com port ' + port)
+    ser = serial.Serial(port, 921600, 8, "N", 1, 10, False, False, 0.5, False)
+    try:
+        if ser.isopen():
+            ser.close()
+            ser.open()
+        else:
+            ser.open()
+    except:
+        ser.close()
+        ser.open()
     counter = 1
     while (True):
-        time.sleep(1)
-        counter += 1
-        m_queue.put(counter)
+        try:
+            line = ser.readline()
+            line_str = line.decode("utf-8")
+            # print(line_str)
+            if (_proc_data(line_str, sc1220_ob) == 1):
+                print("get data R1 " + str(len(sc1220_ob.data_R1)) + " R2 " + str(len(sc1220_ob.data_R2)) + " R3 "
+                      + str(len(sc1220_ob.data_R3)) + " R4 " + str(len(sc1220_ob.data_R4)))
+                counter += 1
+                if (counter > 5):
+                    break
+        except Exception as e:
+            print(e)
+            # break
+    m_queue.put(20000)
+    ser.close()
 
 
 if __name__ == "__main__":
