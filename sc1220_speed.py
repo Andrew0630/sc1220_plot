@@ -192,6 +192,55 @@ def find_doppler_fft(frame):
     return doppler_fft
 
 
+def plot_3_doppler_fft(frame_chirps_peaks, bm, ax, plt, artists):
+    line_init = 1
+    doppler_fft = find_doppler_fft(frame_chirps_peaks)
+
+    if not len(artists):
+        line_init = 0
+    elif ((len(artists) < 3) & (len(doppler_fft) >= 3)):
+        line_init = 0  # 須更新
+
+    for i in range(len(doppler_fft)):
+        value_buff = []
+        for j in range(len(doppler_fft[i][1])):
+            value = (doppler_fft[i][1][j].real ** 2 +
+                     doppler_fft[i][1][j].imag ** 2) ** 0.5
+            value_buff.append(round(value, 3))
+        print('peak', doppler_fft[i][0], value_buff)
+        if value_buff[0] > 10000:
+            value_buff[0] = value_buff[1] + 100
+
+        if not line_init:
+            if (i == 0 & len(artists) == 0):
+                # print(doppler_fft[i][1])
+                print('add artist', i, value_buff)
+                (line_speed_fft,) = ax[i+1,
+                                       1].plot(np.abs(value_buff))
+                bm.add_artist(line_speed_fft)
+                artists.append(line_speed_fft)
+            elif (i == 1 & len(artists) == 1):
+                # print(doppler_fft[i][1])
+                print('add artist', i, value_buff)
+                (line_speed_fft,) = ax[i+1,
+                                       1].plot(np.abs(value_buff))
+                bm.add_artist(line_speed_fft)
+                artists.append(line_speed_fft)
+            elif (i == 2 & len(artists) == 2):
+                # print(doppler_fft[i][1])
+                print('add artist', i, value_buff)
+                (line_speed_fft,) = ax[i+1,
+                                       1].plot(np.abs(value_buff))
+                bm.add_artist(line_speed_fft)
+                artists.append(line_speed_fft)
+            plt.draw()
+
+        if (i < len(artists)):
+            artists[i].set_ydata(np.abs(value_buff))
+
+    return artists
+
+
 # speed of light unit: m/s
 C_speed = 299792458
 # Chirp time unit: us
@@ -331,29 +380,8 @@ while (True):
                     artists[c*3+2].set_ydata(np.abs(r_fft))
         if (c_count == len(data_R1)):
             print('get frame', len(frame_chirps_peaks))
-            doppler_fft = find_doppler_fft(frame_chirps_peaks)
-            for i in range(len(doppler_fft)):
-
-                value_buff = []
-                for j in range(len(doppler_fft[i][1])):
-                    value = (doppler_fft[i][1][j].real ** 2 +
-                             doppler_fft[i][1][j].imag ** 2) ** 0.5
-                    value_buff.append(round(value, 3))
-                print('peak', doppler_fft[i][0], value_buff)
-                if value_buff[0] > 10000:
-                    value_buff[0] = value_buff[1] + 100
-                if not line_rx1_init:
-                    if (i < 3):
-                        # print(doppler_fft[i][1])
-                        (line_speed_fft,) = ax[i+1,
-                                               1].plot(np.abs(value_buff))
-                        bm.add_artist(line_speed_fft)
-                        artists_speed.append(line_speed_fft)
-                        plt.draw()
-                else:
-                    for a in range(len(artists_speed)):
-                        artists_speed[a].set_ydata(np.abs(value_buff))
-
+            artists_speed = plot_3_doppler_fft(
+                frame_chirps_peaks, bm, ax, plt, artists_speed)
             line_rx1_init = 1
         data_redraw = 1
 
