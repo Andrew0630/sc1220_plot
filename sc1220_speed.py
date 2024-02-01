@@ -84,21 +84,21 @@ class BlitManager:
             cv.blit(fig.bbox)
         # let the GUI event loop process anything it has to do
         cv.flush_events()
+
 # 計算每個 fft peak 的距離
 
 
-def calculate_range(freq_peak, TC, BW):  # fs_iq Mhz
+def calculate_range_str(freq_peak):  # fs_iq Mhz
     # ((c*TC)/(2*BW)) * fb
     dis_str = ""
-    range_t = (C_speed*TC/1000000)/(2*BW*1000)
+
     for i in range(len(freq_peak)):
-        if (freq_peak[i] > 0):
-            distance = range_t * freq_peak[i]
-            distance -= 0.023
+        if (freq_peak[i][0] > 0):   # a peak
+            distance = freq_peak[i][1]
             peak_str = 'peak ' + \
                 str(i+1)+' distance: '+str(round(distance, 4)) + \
                 ' m '+str(round(distance*100, 2))+' cm'
-            print('-----', peak_str)
+            # print('-----', peak_str)
             if (len(dis_str)):
                 dis_str += '\n'+peak_str
             else:
@@ -109,24 +109,33 @@ def calculate_range(freq_peak, TC, BW):  # fs_iq Mhz
 # 找出 fft 中的 peak 頻率
 
 
-def find_fft_peak(r_fft, freq):
-    freq_peak = []
-    for i in range(1, len(r_fft)-1):
-        amp_last = (r_fft.real[i-1] ** 2 + r_fft.imag[i-1] ** 2)**0.5
-        amp = (r_fft.real[i] ** 2 + r_fft.imag[i] ** 2)**0.5
-        amp_next = (r_fft.real[i+1] ** 2 + r_fft.imag[i+1] ** 2)**0.5
+def find_fft_peak_and_calculate_range(r_fft, freq, TC, BW):
+    range_peak = []
+    range_t = (C_speed*TC/1000000)/(2*BW*1000)
+    range_peak.append((0, 0, freq[0], r_fft[0]))
+    for i in range(1, int(len(r_fft)/2)):
+        amp_last = (r_fft[i-1].real ** 2 + r_fft[i-1].imag ** 2)**0.5
+        amp = (r_fft[i].real ** 2 + r_fft[i].imag ** 2)**0.5
+        amp_next = (r_fft[i+1].real ** 2 + r_fft[i+1].imag ** 2)**0.5
+        peak = 0
+        distance = 0
         if (amp_last <= amp):
             if ((amp >= amp_next) & (amp >= 5000)):
-                print("-----peak at ", i, " value =", amp,
+                peak = 1
+                distance = range_t * freq[i]
+                distance -= 0.023
+                print("-----peak at ", i, "distance:", round(distance, 4), "m", " value =", amp,
                       r_fft[i], " freq.=", freq[i], " KHz")
-                freq_peak.append(freq[i])
 
-    return freq_peak
+        # 0:peak flag, 1:distance, 2:freq., 3:range-fft
+        range_peak.append((peak, distance, freq[i], r_fft[i]))
+    return range_peak
+
 
 # 劃出頻譜圖
 
 
-def polt_fft_(ch, data_I, data_Q, bm, init):
+def polt_fft_(ch, data_I, data_Q, bm, init, r_fft):
     print('==========RX '+str(ch)+'==========')
 
     font = {'family': 'serif',
@@ -134,28 +143,53 @@ def polt_fft_(ch, data_I, data_Q, bm, init):
             'weight': 'normal',
             'size': 10,
             }
-    r_fft = np.fft.fft(data_I)
+    i_q_raw = []
+    for i in range(len(data_I)):
+        i_q_raw.append(complex(data_I[i], data_Q[i]))
+
     freq = np.fft.fftfreq(np.size(data_I), fs_time)
     plot_xlabel = 'Freq. (KHz) ----- fs_IQ:'+str(fs_IQ)+'KHz,number:'+str(NFFT)
-    fft_peak = find_fft_peak(r_fft, freq)
-    distance = calculate_range(fft_peak, TC, BW)
+    range_peak = find_fft_peak_and_calculate_range(r_fft, freq, TC, BW)
 
+    # return distance str for text
+    distance = calculate_range_str(range_peak)
+
+    # ax[ch-1, 1].plot(np.abs(r_fft))
     if init == 0:
-        # ax[ch-1, 1].plot(np.abs(r_fft))
-        # for text in ax[ch-1, 1].texts:
-        # text.remove()
-        text = ax[ch-1, 1].text(len(r_fft)/2, 5000, distance, fontdict=font, animated=True,
+        text = ax[ch-1, 1].text(len(r_fft)/2, 5000, distance, fontdict=font,
                                 horizontalalignment='center', bbox={'facecolor': 'red', 'alpha': 0.2, 'pad': 10})
         bm.add_artist(text)
     else:
         for text in ax[ch-1, 1].texts:
             text.set_text(distance)
 
+    # ax[ch-1, 1].stem(np.abs(r_fft), 'b', markerfmt=" ", basefmt="-b")
     if (ch == 1):
         ax[ch-1, 1].set_title('bandwidth:'+str(BW)+'MHz, Chirp time:' +
                               str(TC)+'us', size='large')
     ax[ch-1, 1].set_xlabel(plot_xlabel)
-    return r_fft
+    return range_peak
+
+
+def find_doppler_fft(frame):
+    doppler_fft = []
+    for p in range(len(frame[0])):
+
+        all_chirp = 1
+        for c in range(len(frame)):  # 檢查每個 chirp 是不是有相同的 peak
+            if not frame[c][p][0]:
+                all_chirp = 0
+                break
+        if all_chirp:
+            chirp_peaks = []
+            for c in range(len(frame)):  # 取出每個 chirp 的資料 做 fft
+                chirp_peaks.append(frame[c][p][3].imag)
+            # print(p, chirp_peaks)
+            speed_fft = np.fft.fft(chirp_peaks, len(chirp_peaks))
+            print(len(chirp_peaks), len(speed_fft))
+            doppler_fft.append((p, speed_fft))  # 0:peak_index, 1:doppler_fft
+
+    return doppler_fft
 
 
 # speed of light unit: m/s
@@ -166,7 +200,7 @@ TC = 55
 BW = 6800
 # fs unit: KHz
 fs_IQ = 0
-
+cc = 0
 
 sc1220obj = sc1220.SC1220_object()
 
@@ -179,36 +213,37 @@ if (len(sys.argv) < 2):
 else:
     sc1220obj.start(sys.argv[1], my_queue)
 
-plt.style.use(['dark_background'])
+plt.style.use('dark_background')
 fig, ax = plt.subplots(4, 2, constrained_layout=True, animated=True)
 plt.suptitle(t='60GHz radar plot', size='xx-large', c='b')
 plt.gcf().set_size_inches(14, 8)
 
 # ax[0, 0].set_title('Number of Chirps:' + str(noc), size='large')
-ax[0, 0].set_xlabel('NFFT Point-RX1')
+ax[0, 0].set_xlabel('NFFT Point-Chirp 1')
 ax[0, 0].set_ylabel('I and Q reading')
 ax[0, 1].set_ylim([0, 20000])
-ax[1, 0].set_xlabel('NFFT Point-RX2')
+ax[1, 0].set_xlabel('NFFT Point-Chirp 2')
 ax[1, 0].set_ylabel('I and Q reading')
-ax[1, 1].set_ylim([0, 20000])
-ax[2, 0].set_xlabel('NFFT Point-RX3')
+ax[1, 1].set_ylim([0, 50000])
+ax[2, 0].set_xlabel('NFFT Point-Chirp 3')
 ax[2, 0].set_ylabel('I and Q reading')
-ax[2, 1].set_ylim([0, 20000])
-ax[3, 0].set_xlabel('NFFT Point-RX4')
+ax[2, 1].set_ylim([0, 50000])
+ax[3, 0].set_xlabel('NFFT Point-Chirp 4')
 ax[3, 0].set_ylabel('I and Q reading')
-ax[3, 1].set_ylim([0, 20000])
+ax[3, 1].set_ylim([0, 50000])
 
 bm = BlitManager(fig.canvas)
 # make sure our window is on the screen and drawn
 
 plt.show(block=False)
 plt.pause(1)
-
+drawcount = 0
 line_rx1_init = 0
 line_rx2_init = 0
 line_rx3_init = 0
 line_rx4_init = 0
-
+artists = []
+artists_speed = []
 while (True):
     data_redraw = 0
 
@@ -224,6 +259,7 @@ while (True):
 
     start_time = time.time()
     if not plt.fignum_exists(1):
+        print("exit")
         break
     if (msg == 100):
 
@@ -233,12 +269,13 @@ while (True):
         data_R4 = sc1220obj.data_R4
         print("***get data R1 " + str(len(data_R1)) + " R2 " + str(len(data_R2)) + " R3 "
               + str(len(data_R3)) + " R4 " + str(len(data_R4)))
-        if ((len(data_R1) == 1) & (len(data_R2) == 1) & (len(data_R3) == 1) & (len(data_R4) == 1)):
+        if ((len(data_R1) == sc1220obj.noc) & (len(data_R2) == 0) & (len(data_R3) == 0) & (len(data_R4) == 0)):
             TC = sc1220obj.TC
             BW = sc1220obj.BW
             fs_IQ = sc1220obj.fs_IQ
             NFFT = sc1220obj.NFFT
             noc = sc1220obj.noc
+            fram_cc_rate = sc1220obj.fram_cc_rate
             fs_time = 1/fs_IQ
 
             # Joint the data and plotting.
@@ -250,138 +287,83 @@ while (True):
 
     if (msg == 100):
         # plotting Rx1
-        if (len(data_R1)):
-            data_I = []
-            data_Q = []
+        data_I = []
+        data_Q = []
+        c_count = 0
+        frame_chirps_peaks = []
+        for c in range(len(data_R1)):
+            data_I = data_R1[c][0]
+            data_Q = data_R1[c][1]
 
-            for i in range(len(data_R1)):
-                data_I += data_R1[i][0]
-                data_Q += data_R1[i][1]
+            print("I Q", c, data_I[0], data_Q[0], len(data_I), len(data_Q))
+            if ((len(data_I) == NFFT) & (len(data_Q) == NFFT)):
+                c_count += 1
+                r_fft = np.fft.fft(data_I, NFFT)
+                range_peak_per_chirp = polt_fft_(
+                    1, data_I, data_Q, bm, line_rx1_init, r_fft)
+                frame_chirps_peaks.append(range_peak_per_chirp)
+                # plotting
+                if not line_rx1_init:
+                    if not c:
+                        (lineRx1_I,) = ax[0, 0].plot(data_I, 'b', label='I')
+                        (lineRx1_Q,) = ax[0, 0].plot(data_Q, 'r', label='Q')
+                        ax[0, 1].set_ylim([0, 20000])
+                        legend = ax[0, 0].legend(
+                            loc='upper right', shadow=False, fontsize='x-small', framealpha=0.2)
+                        # Put a nicer background color on the legend.
+                        legend.get_frame().set_facecolor('C0')
+                    else:
+                        (lineRx1_I,) = ax[0, 0].plot(data_I, 'b')
+                        (lineRx1_Q,) = ax[0, 0].plot(data_Q, 'r')
+                    (lineRx1_fft,) = ax[0, 1].plot(np.abs(r_fft))
 
-            r_fft = polt_fft_(1, data_I, data_Q, bm, line_rx1_init)
+                    bm.add_artist(lineRx1_I)
+                    bm.add_artist(lineRx1_Q)
+                    bm.add_artist(lineRx1_fft)
+                    artists.append(lineRx1_I)
+                    artists.append(lineRx1_Q)
+                    artists.append(lineRx1_fft)
+                    plt.draw()
 
-            # plotting
-            if not line_rx1_init:
-                (lineRx1_I,) = ax[0, 0].plot(data_I, 'b', label='I')
-                (lineRx1_Q,) = ax[0, 0].plot(data_Q, 'r', label='Q')
-                (lineRx1_fft,) = ax[0, 1].plot(np.abs(r_fft))
-                legend = ax[0, 0].legend(
-                    loc='upper right', shadow=False, fontsize='x-small', framealpha=0.2)
-                # Put a nicer background color on the legend.
-                legend.get_frame().set_facecolor('C0')
-                bm.add_artist(lineRx1_I)
-                bm.add_artist(lineRx1_Q)
-                bm.add_artist(lineRx1_fft)
-                plt.draw()
-                line_rx1_init = 1
-            else:
-                lineRx1_I.set_ydata(data_I)
-                lineRx1_Q.set_ydata(data_Q)
-                lineRx1_fft.set_ydata(np.abs(r_fft))
+                else:
+                    artists[c*3].set_ydata(data_I)
+                    artists[c*3+1].set_ydata(data_Q)
+                    artists[c*3+2].set_ydata(np.abs(r_fft))
+        if (c_count == len(data_R1)):
+            print('get frame', len(frame_chirps_peaks))
+            doppler_fft = find_doppler_fft(frame_chirps_peaks)
+            for i in range(len(doppler_fft)):
 
-        else:
-            if not line_rx1_init:
-                ax[0, 0].set_title('Number of Chirps:' +
-                                   str(noc), size='large')
-                ax[0, 1].set_title('bandwidth:'+str(BW)+'MHz, Chirp time:' +
-                                   str(TC)+'us', size='large')
-                line_rx1_init = 1
+                value_buff = []
+                for j in range(len(doppler_fft[i][1])):
+                    value = (doppler_fft[i][1][j].real ** 2 +
+                             doppler_fft[i][1][j].imag ** 2) ** 0.5
+                    value_buff.append(round(value, 3))
+                print('peak', doppler_fft[i][0], value_buff)
+                if value_buff[0] > 10000:
+                    value_buff[0] = value_buff[1] + 100
+                if not line_rx1_init:
+                    if (i < 3):
+                        # print(doppler_fft[i][1])
+                        (line_speed_fft,) = ax[i+1,
+                                               1].plot(np.abs(value_buff))
+                        bm.add_artist(line_speed_fft)
+                        artists_speed.append(line_speed_fft)
+                        plt.draw()
+                else:
+                    for a in range(len(artists_speed)):
+                        artists_speed[a].set_ydata(np.abs(value_buff))
 
-        # plotting Rx2
-        if (len(data_R2)):
-            data_I = []
-            data_Q = []
-
-            for i in range(len(data_R2)):
-                data_I += data_R2[i][0]
-                data_Q += data_R2[i][1]
-
-            r_fft = polt_fft_(2, data_I, data_Q, bm, line_rx2_init)
-
-            # plotting
-            if not line_rx2_init:
-                (lineRx2_I,) = ax[1, 0].plot(data_I, 'b', label='I')
-                (lineRx2_Q,) = ax[1, 0].plot(data_Q, 'r', label='Q')
-                (lineRx2_fft,) = ax[1, 1].plot(np.abs(r_fft))
-                legend = ax[1, 0].legend(
-                    loc='upper right', shadow=False, fontsize='x-small', framealpha=0.2)
-                # Put a nicer background color on the legend.
-                legend.get_frame().set_facecolor('C0')
-                bm.add_artist(lineRx2_I)
-                bm.add_artist(lineRx2_Q)
-                bm.add_artist(lineRx2_fft)
-                plt.draw()
-                line_rx2_init = 1
-            else:
-                lineRx2_I.set_ydata(data_I)
-                lineRx2_Q.set_ydata(data_Q)
-                lineRx2_fft.set_ydata(np.abs(r_fft))
-
-        # plotting Rx3
-        if (len(data_R3)):
-            data_I = []
-            data_Q = []
-
-            for i in range(len(data_R3)):
-                data_I += data_R3[i][0]
-                data_Q += data_R3[i][1]
-
-            r_fft = polt_fft_(3, data_I, data_Q, bm, line_rx3_init)
-
-            # plotting
-            if not line_rx3_init:
-                (lineRx3_I,) = ax[2, 0].plot(data_I, 'b', label='I')
-                (lineRx3_Q,) = ax[2, 0].plot(data_Q, 'r', label='Q')
-                (lineRx3_fft,) = ax[2, 1].plot(np.abs(r_fft))
-                legend = ax[2, 0].legend(
-                    loc='upper right', shadow=False, fontsize='x-small', framealpha=0.2)
-                # Put a nicer background color on the legend.
-                legend.get_frame().set_facecolor('C0')
-                bm.add_artist(lineRx3_I)
-                bm.add_artist(lineRx3_Q)
-                bm.add_artist(lineRx3_fft)
-                plt.draw()
-                line_rx3_init = 1
-            else:
-                lineRx3_I.set_ydata(data_I)
-                lineRx3_Q.set_ydata(data_Q)
-                lineRx3_fft.set_ydata(np.abs(r_fft))
-        # plotting Rx4
-        if (len(data_R4)):
-            data_I = []
-            data_Q = []
-
-            for i in range(len(data_R4)):
-                data_I += data_R4[i][0]
-                data_Q += data_R4[i][1]
-
-            r_fft = polt_fft_(4, data_I, data_Q, bm, line_rx4_init)
-
-            # plotting
-            if not line_rx4_init:
-                (lineRx4_I,) = ax[3, 0].plot(data_I, 'b', label='I')
-                (lineRx4_Q,) = ax[3, 0].plot(data_Q, 'r', label='Q')
-                (lineRx4_fft,) = ax[3, 1].plot(np.abs(r_fft))
-                legend = ax[3, 0].legend(
-                    loc='upper right', shadow=False, fontsize='x-small', framealpha=0.2)
-                # Put a nicer background color on the legend.
-                legend.get_frame().set_facecolor('C0')
-                bm.add_artist(lineRx4_I)
-                bm.add_artist(lineRx4_Q)
-                bm.add_artist(lineRx4_fft)
-                plt.draw()
-                line_rx4_init = 1
-            else:
-                lineRx4_I.set_ydata(data_I)
-                lineRx4_Q.set_ydata(data_Q)
-                lineRx4_fft.set_ydata(np.abs(r_fft))
+            line_rx1_init = 1
         data_redraw = 1
 
     bm.update()
     if data_redraw:
         sc1220obj.drawn_done = 1
+        drawcount += 1
         print('redraw done ', (time.time() - start_time), 's')
-
+    if (drawcount == 10):
+        plt.draw()
     # time.sleep(0.1)
 
 sc1220obj.stop(my_queue)
